@@ -349,6 +349,23 @@ class SanicASGITestClient(httpx.AsyncClient):
 
         self.gather_request = True
         self.last_request = None
+    
+    async def setup(self):
+        self.sanic_app.router.reset()
+        self.sanic_app.signal_router.reset()
+        await self.sanic_app._startup()  # type: ignore
+        await self.sanic_app._server_event("init", "before")
+        await self.sanic_app._server_event("init", "after")
+        for route in self.sanic_app.router.routes:
+            if self._collect_request not in route.extra.request_middleware:
+                route.extra.request_middleware.appendleft(
+                    self._collect_request
+                )
+
+    async def shutdown(self):
+        await self.sanic_app._server_event("shutdown", "before")
+        await self.sanic_app._server_event("shutdown", "after")
+
 
     def _collect_request(self, request):
         if self.gather_request:
@@ -369,17 +386,6 @@ class SanicASGITestClient(httpx.AsyncClient):
     ) -> typing.Tuple[
         typing.Optional[Request], typing.Optional[TestingResponse]
     ]:
-        self.sanic_app.router.reset()
-        self.sanic_app.signal_router.reset()
-        await self.sanic_app._startup()  # type: ignore
-        await self.sanic_app._server_event("init", "before")
-        await self.sanic_app._server_event("init", "after")
-        for route in self.sanic_app.router.routes:
-            if self._collect_request not in route.extra.request_middleware:
-                route.extra.request_middleware.appendleft(
-                    self._collect_request
-                )
-
         if not url.startswith(
             ("http:", "https:", "ftp:", "ftps://", "//", "ws:", "wss:")
         ):
@@ -394,10 +400,6 @@ class SanicASGITestClient(httpx.AsyncClient):
 
         self.gather_request = gather_request
         response = await super().request(method, url, *args, **kwargs)
-
-        await self.sanic_app._server_event("shutdown", "before")
-        await self.sanic_app._server_event("shutdown", "after")
-
         response.__class__ = TestingResponse
 
         if gather_request:
